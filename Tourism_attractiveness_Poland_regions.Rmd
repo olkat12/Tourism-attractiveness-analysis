@@ -1,0 +1,1656 @@
+---
+title: "Analiza atrakcyjności turystycznej województw Polski"
+author: "Aleksandra Talaga"
+date: "2024-10-09"
+output: 
+  html_document:
+    css: sad_style.css
+    code_folding: hide
+    toc: true
+    toc_depth: 3
+    toc_float:
+      collapsed: yes
+      smooth_scroll: yes
+
+---
+
+<br><br>
+
+# **1. Wstęp**
+
+<br><br>
+
+  
+
+Celem pracy jest wykorzystanie metod analizy wielorymiarowej (porządkowania liniowego oraz analizy skupień) w celu oceny atrakcyjności turystycznej województw Polski. Badanie inspiruje się kilkoma pracami naukowymi, w szczególności:    
+- **"Analiza atrakcyjności turystycznej miast wojewódzkich"** (Iwona Bąk, Beata Szczecińska) - wykorzystana przy wyborze tematyki oraz wstępnego wyboru cech do badania    
+- **"Statystyczne metody doboru zmiennych w porządkowaniu liniowym"** (Andrzej Bąk) - wykorzystana przy wyborze najlepszych cech    
+- **"Ranking województw ze względu na potencjał rolnictwa"** (Joanna Kisielińska) - wykorzystana przy wyznaczaniu miar podobieństw rankingów    
+
+<br><br>
+
+# **2. Wybór zmiennych**
+
+<br><br>
+
+Na atrakcyjność turystyczną danego miejsca składają się specyficzne cechy i elementy środowiska przyrodniczego oraz przejawy działalności człowieka. Cechy wstępnie wybrane do tej pracy wpływające na atrakcyjność turystyczną województw zostały podzielone na trzy kategorie. Wszystkie dane pochodzą ze stronu Głównego Urzędu Statystycznego z roku 2022. <br><br>    
+
+**1. Walory środowiskowe**  
+
+X1 - liczba pomników przyrody przypadających na 100km2   
+X2 - udział terenów zieleni (obszarów przestrzeni otwartej, które są pokryte roślinnością taką jak trwaniki, drzewa, krzewy i kwiaty) w powierzchni województwa [%]    
+X3 - udział gruntów leśnych w powierzchni województwa [%]      
+X4 – nakłady pieniężne na środki trwałe służące ochronie środowiska i gospodarce wodnej przeliczone na mieszkańca [zł]    
+X5 – emisja pyłów przeliczona na 1km2 [t/r]   
+X6 – powierzchnia dzikich wysypisk przypadająca na 1km2 [m2]  
+
+X5 oraz X6 to destymulanty, pozostałe dane to stymulanty.   
+<br>
+
+**2. Walory kulturalne i rekreacyjne**    
+
+X7 - liczba muzeów łącznie z oddziałami przypadających na 1000km2  
+X8 – liczba kin stałych przypadających na 1000km2  
+X9 – liczba centrów kultury przypadających na 10tys. osób (centrów, domów i ośrodków kultury, klubów i świetlic)  
+X10 – liczba ogrodów botanicznych i zoologicznych (łącznie) przypadających na 1000km2  
+X11 – liczba wydarzeń kulturalnych przypadających na 10tys. osób (imprez rozrywkowo-kulturowych lub sportowych)    
+Wszystkie dane to stymulanty.  
+<br>
+
+**3. Infrastruktura**  
+
+X12 – liczba obiektów turystycznych noclegowych przypadająca na 10tys. osób   
+X13 – stopień wykorzystania miejsc noclegowych [%]   
+X14 – liczba placówek gastronomicznych przypadających na 100km2 (dotyczy placówek w których pracowało co najmniej 10 osób) 
+X15 – przewozy pasażerów w milionach osób przypadające na 100tys. ludności   
+X16 – liczba aptek przypadających na 10tys. osób   
+Wszystkie dane to stymulanty.   
+
+<br>
+
+
+
+```{r warning=FALSE, message=FALSE}
+library(readxl)
+library(ggplot2)
+library(dplyr)
+library(moments)
+library(rnaturalearth)
+library(sf)
+library(gridExtra)
+library(DT)
+library(corrplot)
+library(knitr)
+library(fmsb)
+library(factoextra)
+library(clusterSim)
+set.seed(12)
+
+
+wojewodztwa <- read_excel("wojewodztwa2022.xlsx")
+wojewodztwa[, 3:ncol(wojewodztwa)] <- round(wojewodztwa[, 3:ncol(wojewodztwa)], 2)
+```
+
+<br><br>
+
+## **2.1 Analiza wybranych cech**
+
+<br>
+
+Badanie rozpoczynam od wstępnej analizy wybranych cech: przedstawienia ich podstawowych stasystyk opisowych oraz wizualizacji, które pomogą w lepszym zrozumieniu danych, które będą decydować o rankingu województw.
+
+<br><br><br>
+
+### **2.1a Wybrane zmienne**
+
+**Tabela 1** - zmienne diagnostyczne wybrane do badania
+```{r warning=FALSE, message=FALSE}
+datatable(wojewodztwa, options = list(scrollX = TRUE, pageLength = 16))
+```
+
+<br><br><br>
+
+### **2.1b Statystyki opisowe**
+
+ **Tabela 2** - statystyki opisowe zmiennych diagnostycznych
+```{r warning=FALSE, message=FALSE}
+statystyki_opisowe <- data.frame(matrix(ncol = 8, nrow = 16))
+
+
+oblicz_statystyki <- function(kolumna)
+{
+  return(
+    c(
+      round(mean(kolumna),2),
+      round(median(kolumna),2),
+      round(sd(kolumna),2),
+      round(min(kolumna),2),
+      round(max(kolumna),2),
+      round(skewness(kolumna),2),
+      round(kurtosis(kolumna),2),
+      round(sd (kolumna) / mean(kolumna) * 100, 2)
+    )
+  )
+}
+
+
+statystyki_opisowe[,] <- t(sapply(wojewodztwa[, 3:ncol(wojewodztwa)], oblicz_statystyki))
+
+rownames(statystyki_opisowe) <- colnames(wojewodztwa)[3:ncol(wojewodztwa)]
+colnames(statystyki_opisowe) <-  c("Srednia", "Mediana", "Odchylenie", "Min", "Max", "Skosnosc", "Kurtoza", "Wsp. zmiennosci")
+
+datatable(statystyki_opisowe, options = list(pageLength = 16))
+```
+
+<br><br><br>
+
+### **2.1c Wykresy pudełkowe**
+
+**Wykres 1** - Wykresy pudełkowe zmiennych diagnostycznych
+
+```{r warning=FALSE, message=FALSE}
+
+pudelkowe <- list()
+
+for (i in 3:ncol(wojewodztwa)) {
+  
+  wykres <- ggplot(wojewodztwa, aes_string(x = colnames(wojewodztwa)[i])) +
+    geom_boxplot() +
+    labs(title = colnames(wojewodztwa)[i]) +
+    theme_minimal() +
+    theme(
+      plot.title = element_text(hjust = 0.5),
+      axis.title.x = element_blank(),           
+      axis.text.y = element_blank() 
+    ) 
+  
+  pudelkowe[[i - 2]] <- wykres
+}
+
+grid.arrange(grobs = pudelkowe, ncol = 4)
+```
+
+<br><br>
+Statystyki opisowe oraz wykresy pudełkowe pozwalają na wyciągnięcie pierwszych wniosków o danych:   
+- w przypadku aż 9 na 16 zmiennych występują wartości odstające. Za każdym razem są to wartości zlokalizowane na prawo od "pudełka", czyli duże wartości   
+- w większości przypadków mamy do czynienia z asymetrią prawostronną (dodatni współczynnik skośności, outliery występujące po prawej stronie). Wynika to z tego, że wsytępuje mało obserwacji o bardzo dużych wartościach. Pojedyńcze duże wartości ciągną "ogon" wykresu w prawą stronę i powodują asymetrię. Średnia jest w takim wypadku zawyżona i większa od mediany   
+- zmienna opisująca liczbę pomników wykazuje jako jedyna asymetrię lewostronną. Natomiast zmienne dotyczące lesistości, funduszy na ochronę środowiska oraz pasażerów komunikacji miejskiej mają współczynnik asymetrii bliski 0, czyli są symetryczne. Znaczy to, że mediana i średnia są sobie bliskie oraz że występuje podobna ilość zarówno dużych jak i małych obserwacji. Wydaje się więc, że będą to zmienne mocno zróżnicowane, co zostanie zbadane później współczynnikiem zmienności.    
+- dane na tym etapie (przed usunięciem wartości odstających) mają najczęśniej wysokie współczynniki zmienności. Wartości zmiennej wysypiska wahają się o ponad 100%. W obrębie tej zmiennej występują ogromne wartości odstające (max ≈ 40 przy średniej ≈ 8) Reszta danyhch nie ma aż tak esktremalnego współczynnika zmienności, choć w większości przypadków jest on wysoki i dla 10 zmiennych przekracza 50%. Jedynie zmienna apteki wykazuje niemal brak zmienności (poniżej 10%, jej odchylenie standardowe jest bliskie 0)    
+
+
+<br><br><br>
+
+### **2.1d Mapy**
+
+```{r warning=FALSE, message=FALSE}
+poland <- ne_states(country = "Poland", returnclass = "sf")
+
+
+maps_wojewodztwa <- wojewodztwa
+
+
+
+maps_wojewodztwa$nazwa <- c("Dolnoslaskie", "Kujawsko-Pomorskie", "Lubelskie",
+                            "Lubuskie", "Lódzkie", "Malopolskie", "Mazowieckie",
+                            "Opolskie", "Podkarpackie", "Podlaskie", "Pomorskie",
+                            "Slaskie", "Swietokrzyskie", "Warminsko-Mazurskie",
+                            "Wielkopolskie", "Zachodniopomorskie"
+                            )
+
+colnames(maps_wojewodztwa)[colnames(maps_wojewodztwa) == "nazwa"] <- "name_alt"
+poland <- left_join(poland, maps_wojewodztwa, by = "name_alt")
+```
+
+
+<br>
+Przedstawienie danych na mapie administracyjnej Polski z podziałem na województwa pozwoli na jeszcze lepsze zobrazowanie tego, jak dane cechy rozkładają się w poszczególnych obszarach. Czym ciemniejszy kolor, tym natężenie cechy większe. Należy pamiętać, że dla stymulant lepiej jest, gdy cecha posiada wyższe natężenie, natomiast dla destymulant jest odwrotnie. Cechy przedstawiono na mapach według 3 kategorii przedstawionych we wstępie. Osobno przedstawiono dwie mapy z destymulantami. 
+
+<br>
+
+**Wykres 2** - Walory środowiskowe - stymulanty
+
+```{r warning=FALSE, message=FALSE}
+w1 <- ggplot(data = poland) +
+  geom_sf(aes(fill = pomniki)) +
+  scale_fill_gradient(low = "#f0f4c3", high = "darkgreen") +
+  theme_minimal() + 
+  labs(title = "Liczba pomników przyrody na 100km2",
+       fill = "[pomnik/100km2]") +
+  theme(plot.title = element_text(size = 10),
+        legend.title = element_text(size = 8))
+
+w2 <- ggplot(data = poland) +
+  geom_sf(aes(fill = tereny_zieleni)) +  
+  scale_fill_gradient(low = "#f0f4c3", high = "darkgreen") + 
+  theme_minimal() + 
+  labs(title = "Udział terenów zieleni w powierzchni województwa",
+       fill = "[%]") +
+  theme(plot.title = element_text(size = 10),
+        legend.title = element_text(size = 8))
+
+w3 <- ggplot(data = poland) +
+  geom_sf(aes(fill = lasy)) +  
+  scale_fill_gradient(low = "#f0f4c3", high = "darkgreen") + 
+  theme_minimal() + 
+  labs(title = "Udział gruntów leśnych w obszarze województwa",
+       fill = "[%]") +
+  theme(plot.title = element_text(size = 10),
+        legend.title = element_text(size = 8))
+
+w4 <- ggplot(data = poland) +
+  geom_sf(aes(fill = fundusze_ochrona)) +  
+  scale_fill_gradient(low = "#f0f4c3", high = "darkgreen") + 
+  theme_minimal() + 
+  labs(title = "Nakłady pieniężne na ochronę środowiska na 1 mieszkańca",
+       fill = "[zł/os]") +
+  theme(plot.title = element_text(size = 10),
+        legend.title = element_text(size = 8))
+
+
+grid.arrange(w1, w2, w3, w4, ncol = 2)
+```
+
+
+<br><br>
+
+**Wykres 3** - Walory środowiskowe - destymulanty
+
+```{r warning=FALSE, message=FALSE}
+w5 <- ggplot(data = poland) +
+  geom_sf(aes(fill = emisja_pylow)) +  
+  scale_fill_gradient(low = "#ffebee", high = "#cc0000") + 
+  theme_minimal() + 
+  labs(title = "Eemisja pyłów na 1km2",
+       fill = "[t/r / km2]") +
+  theme(plot.title = element_text(size = 10),
+        legend.title = element_text(size = 8))
+
+w6 <- ggplot(data = poland) +
+  geom_sf(aes(fill = wysypiska)) +  
+  scale_fill_gradient(low = "#ffebee", high = "#cc0000") + 
+  theme_minimal() + 
+  labs(title = "Powierzchnia dzikich wysypiskna 1km2",
+       fill = "[m2/km2]") +
+  theme(plot.title = element_text(size = 10),
+        legend.title = element_text(size = 8))
+
+grid.arrange(w5, w6, ncol = 2)
+```
+
+
+Jeśli chodzi o walory środowiskowe, trudno ocenić jednoznacznie, które województwa są najbardziej atrykcyjne, ponieważ nie ma województw, które wykazywałyby najmniejsze lub największe natężenie jednocześnie dla większości cech. Województwa z północno-środkowej Polski mają mniejszy udział terenów zieleni i gruntów leśnych niż województwa z pozostałej części kraju. Województwa z północy wydają mniej funduszy na ochronę środowiska w przeliczeniu na osobę niż pozostałe. Województwo małopolskie jest na czele zarówno we wskaźniku pomników przyrody jak i lesistości, a także ma duży udział terenów zielonych. Duże natężenie pozytywnych cech środowiskowych w 3 na 4 przypadkach wykazują także województwa mazowieckie i podkarpackie. Natomiast podobny pozytywny poziom trzyma we wszystkich czterech przypadkach województwo śląskie. Jeśli chodzi o destymulanty walorów środowiskowych, to tutaj jedynie dwa województwa wypadają negatywnie - województwo śląskie dla obu cech bardzo przekracza przeciętny poziom, a województwo dolnośląskie tylko w przypadku dzikich wysypisk.   
+
+<br><br>
+
+**Wykres 4** - Walory kulturalne i rekreacyjne
+
+```{r warning=FALSE, message=FALSE, fig.width = 10, fig.height = 8}
+w7 <- ggplot(data = poland) +
+  geom_sf(aes(fill = muzea)) +  
+  scale_fill_gradient(low = "#f0f4c3", high = "darkgreen") +
+  theme_minimal() + 
+  labs(title = "Liczba muzeów na 1000km2",
+       fill = "[muzea/1000km2]") +
+  theme(plot.title = element_text(size = 10),
+        legend.title = element_text(size = 8))
+
+w8 <- ggplot(data = poland) +
+  geom_sf(aes(fill = kina)) +  
+  scale_fill_gradient(low = "#f0f4c3", high = "darkgreen") +
+  theme_minimal() + 
+  labs(title = "Liczba kin na 1000km2",
+       fill = "[kina/km2]") +
+  theme(plot.title = element_text(size = 10),
+        legend.title = element_text(size = 8))
+
+w9 <- ggplot(data = poland) +
+  geom_sf(aes(fill = centra_kult)) +  
+  scale_fill_gradient(low = "#f0f4c3", high = "darkgreen") +
+  theme_minimal() + 
+  labs(title = "Centra kultury na 10tys. mieszkańców",
+       fill = "[centra/10tys. osob]") +
+  theme(plot.title = element_text(size = 10),
+        legend.title = element_text(size = 8))
+
+w10 <- ggplot(data = poland) +
+  geom_sf(aes(fill = zoo_bot)) +  
+  scale_fill_gradient(low = "#f0f4c3", high = "darkgreen") +
+  theme_minimal() + 
+  labs(title = "Ogrody zoologiczne, botaniczne na 1000km2",
+       fill = "[ogrody/1000km2]") +
+  theme(plot.title = element_text(size = 10),
+        legend.title = element_text(size = 8))
+
+w11 <- ggplot(data = poland) +
+  geom_sf(aes(fill = wyd_kulturalne)) +  
+  scale_fill_gradient(low = "#f0f4c3", high = "darkgreen") +
+  theme_minimal() + 
+  labs(title = "Wydarzenia kulturalne na 10tys. mieszkańców",
+       fill = "[wydarzenia/10tys. osób]") +
+  theme(plot.title = element_text(size = 10),
+        legend.title = element_text(size = 8))
+
+grid.arrange(w7, w8, w9, w10, w11)
+```
+
+Dla każdej cechy jedno lub dwa województwa wyraźnie odróżniają się pozytywnie od reszty, natomiast pozostałe w większości wykazują umiarkowano-niskie poziomy natężenia dla walorów kulturalnych i rekreacyjnych. Muzea i kina najgęściej położone są w małopolsce i na Śląsku, jednak te województwa nie mają wielu centrów kultury czy wydarzeń kulturalnych w przeliczeniu na mieszkańców. Może być to spowodowane tym, że są to bardzo gęsto zaludnione województwa (szczególnie Śląsk) i dlatego cechy przeliczane na osobę wypadają gorzej niż te przeliczane na 1km2. Najsłabszymi terenami pod względem większości cech są województwa z północno-wschodniej i wschodniej Polski. Województwa lubuskie, wielkopolskie, łódzkie, świętokrzyskie, warmińsko-mazurskie we wszystkich przypadkach wykazują niskie natężenie i nie wyróżniają się pozytywnie pod względem żadnej cechy. 
+  
+
+<br><br>
+
+**Wykres 5** - Infrastruktura
+
+
+```{r warning=FALSE, message=FALSE, fig.width = 10, fig.height = 8}
+w12 <- ggplot(data = poland) +
+  geom_sf(aes(fill = obkt_noclegowe)) +  
+  scale_fill_gradient(low = "#f0f4c3", high = "darkgreen") +
+  theme_minimal() + 
+  labs(title = "Liczba obiektów noclegowych na 10tys. mieszkańców",
+       fill = "[obiekty/10tys. osób]") +
+  theme(plot.title = element_text(size = 10),
+        legend.title = element_text(size = 8))
+
+w13 <- ggplot(data = poland) +
+  geom_sf(aes(fill = stopien_noclegi)) +  
+  scale_fill_gradient(low = "#f0f4c3", high = "darkgreen") +
+  theme_minimal() + 
+  labs(title = "Stopień wykorzystania miejsc noclegowych",
+       fill = "[%]") +
+  theme(plot.title = element_text(size = 10),
+        legend.title = element_text(size = 8))
+
+w14 <- ggplot(data = poland) +
+  geom_sf(aes(fill = gastronomia)) +  
+  scale_fill_gradient(low = "#f0f4c3", high = "darkgreen") +
+  theme_minimal() + 
+  labs(title = "Liczba placówek gastronomicznych na 100km2",
+       fill = "[placówki/100km2]") +
+  theme(plot.title = element_text(size = 10),
+        legend.title = element_text(size = 8))
+
+w15 <- ggplot(data = poland) +
+  geom_sf(aes(fill = komunikacja_miej)) +  
+  scale_fill_gradient(low = "#f0f4c3", high = "darkgreen") +
+  theme_minimal() + 
+  labs(title = "Przewozy pasażerów w mln osób na 100tys. ludności",
+       fill = "[mln os. / 100tys. osób]") +
+  theme(plot.title = element_text(size = 10),
+        legend.title = element_text(size = 8))
+
+w16 <- ggplot(data = poland) +
+  geom_sf(aes(fill = apteki)) +  
+  scale_fill_gradient(low = "#f0f4c3", high = "darkgreen") +
+  theme_minimal() + 
+  labs(title = "Liczba aptek na 10tys. osób",
+       fill = "[apteki / 10tys. osób]") +
+  theme(plot.title = element_text(size = 10),
+        legend.title = element_text(size = 8))
+
+grid.arrange(w12, w13, w14, w15, w16)
+```
+
+Znów ciężko o jednoznaczne wnioski. Jeśli chodzi o placówki noclegowe i ich wykorzystanie, to najsłabiej wypadają województwa ze środkowej Polski. Aż w trzech cechach województwo mazowieckie bardzo przekracza przeciętny poziom infrastruktury. Często duże natężenie cech na tle innych zauważalne są też w: zachodniopomorskim, małopolskim i pomorskim. W sumie te 4 województwa wydają się najbardziej rozwinięte pod względem infrastruktury. Co ciekawe, zmienna, która jest na bardzo dobrym poziomie we wszystkich niemal województwa dotyczy rozwoju komunikacji miejskiej (przewozu pasażerów przeliczonych na mieszkańców). Tutaj zauważalnie słabsze są jedynie podkarpackie i śląskie.
+
+<br><br>
+**Wykres 6** - Wszystkie cechy stymulanty
+
+Dla sprawdzenia, czy istnieją powiązania między poszczczególnymi grupami cech warto zobaczyć jeszcze wszystkie wykresy na jednym wspólnym wykresie. (oprócz cech destymulant, które mogłyby utrudnić poprawną interpretację)
+
+
+```{r warning=FALSE, message=FALSE, fig.width = 14, fig.height = 16}
+grid.arrange(w1, w2, w3, w4, w7, w8, w9, w10,
+             w11, w12, w13, w14, w15, w16, ncol = 3)
+```
+
+<br><br>
+
+Dla wielu cech dwa lub trzy województwa posiadają bardzo wysokie natężenie, natomiast pozostałe województwa mają średnie lub niskie natężenie tej cechy. Oznacza to, że większość województw nie dorównuje tym kilku, które wiodą prym w danej kwestii. Nie ma jednak województwa idealnego czy antyidealnego dla wszystkich zmiennych. Mapy bardzo dobrze to obrazują. Sygnalizowały to także statystyki opisowe i wykresy pudełkowe.
+<br><br>
+Po wstępnej analizie należy zająć się wartościami odstającymi, aby nie zawyżały średniej dla danej cechy oraz żeby lepiej rozróżniać jak cechy o średnim i przeciętnym natężeniu różnią się między sobą. Można wartości odstające zastąpić np górną końcówką "wąsa" na wykresie pudełkowym. Ja będę zastępować je kwantylem 0.85, 0.9 lub 0.95 decydując indywidualnie dla każdej cechy, w zależności od tego, jak wiele obserwacji posiada wysokie wartości i jak kształtują się te kwantyle (czasem zdarzało się tak, że po zastąpieniu dla wszystkich zmiennych od razu kwantylem 0.85, obserwacje, które wcześniej były odstające, przestały mieć maksymalną wartość w obrębie danej zmiennej. Celem jest zastąpienie bardzo dużych wartości trochę mniejszymi, bliższymi górnego kwantyla, ale nie można zmieniać ich aż tak, by pozmieniać kolejność tego, które województwa miały najwyższą wartość danej cechy)
+
+<br><br>
+
+## **2.2 Podmiana wartości odstających. Dobór najlepszych cech do badania**
+
+```{r warning=FALSE, message=FALSE}
+tereny_zieleni_kwantyl <- round(quantile(wojewodztwa$tereny_zieleni, 0.85),2)
+wojewodztwa$tereny_zieleni[wojewodztwa$tereny_zieleni > 1] <- tereny_zieleni_kwantyl
+
+emisja_kwantyl <- round(quantile(wojewodztwa$emisja_pylow, 0.9),2)
+wojewodztwa$emisja_pylow[wojewodztwa$emisja_pylow > 0.2] <- emisja_kwantyl
+
+wysypiska_kwantyl <- round(quantile(wojewodztwa$wysypiska, 0.9),2)
+wojewodztwa$wysypiska[wojewodztwa$wysypiska > 15] <- wysypiska_kwantyl
+
+muzea_kwantyl <- round(quantile(wojewodztwa$muzea, 0.9),2)
+wojewodztwa$muzea[wojewodztwa$muzea > 6] <- muzea_kwantyl
+
+kina_kwantyl <- round(quantile(wojewodztwa$kina, 0.9),2)
+wojewodztwa$kina[wojewodztwa$kina > 2.9] <- kina_kwantyl
+
+zoo_bot_kwantyl <- round(quantile(wojewodztwa$zoo_bot, 0.95),2)
+wojewodztwa$zoo_bot[wojewodztwa$zoo_bot > 0.55] <- zoo_bot_kwantyl
+
+wyd_kulturalne_kwantyl <- round(quantile(wojewodztwa$wyd_kulturalne, 0.9),2)
+wojewodztwa$wyd_kulturalne[wojewodztwa$wyd_kulturalne > 2] <- wyd_kulturalne_kwantyl
+
+noclegi_kwantyl <- round(quantile(wojewodztwa$obkt_noclegowe, 0.9),2)
+wojewodztwa$obkt_noclegowe[wojewodztwa$obkt_noclegowe > 5] <- noclegi_kwantyl
+
+gastronomia_kwantyl <- round(quantile(wojewodztwa$gastronomia, 0.9),2)
+wojewodztwa$gastronomia[wojewodztwa$gastronomia > 5] <- muzea_kwantyl
+
+
+
+```
+
+
+Po zastąpieniu wartości odstających należy zająć się jeszcze doborem najlepszych cech do badania. Jednym z kryteriów może być współczynnik zmienności. Powinien być on stosunkowo wysoki. Drugim kryterium jest korelacja między cechami. Jeśli dwie cechy są ze sobą mocno skorelowane, to wnoszą do badania podobne informacje, więc wówczas usunięcie jednej z nich nie spowoduje utraty informacji.
+
+### **2.2a Współczynnik zmienności**
+
+
+
+```{r warning=FALSE, message=FALSE}
+
+wsp_zmiennosci <- c()
+wsp_zmiennosci <- sapply(wojewodztwa[, 3:ncol(wojewodztwa)], function(kolumna)
+{
+  round((sd(kolumna) / mean(kolumna)) * 100, 2)
+})
+
+wsp_zmiennosci
+
+```
+
+
+Usunięcie outlierów zdecydowanie zmniejszyło współczynnik zmienności wielu cech. Nie ma już eskstremalnego poziomu ponad 120% dla wysypisk (teraz to wciąż najwyższy poziom wśród wszystkich zmiennych, ale wynosi ponad 80%). Jednak wciąż duża zmienność jest zachowana (to dobrze dla badania). Decyduję, że dane, które będą brały udział w dalszym badaniu powinny mieć współczynnik zmienności większy od 10%. Tego kryterium nie spełnia zmienna dotycząca aptek, dlatego od razu ją eliminuję. Stopień wykorzystania miejsc noclegowych ma około 15% zmienności, ale decyduję na zostawienie tej zmiennej. Bardzo wysoki współczynnik zmienności oprócz wysypisk mają lasy (prawie 70%). Pozostałe zmienne mają średni współczynnik oscylujący gdzieś między około 20% a około 60%.
+
+```{r warning=FALSE, message=FALSE}
+wojewodztwa <- wojewodztwa[,-18]
+```
+
+### **2.2b Korelacje między zmiennymi**
+
+<br><br>
+
+**Tabela 3** - Korelacje między zmiennymi
+
+
+```{r warning=FALSE, message=FALSE}
+
+korelacje <- cor(wojewodztwa[, 3:ncol(wojewodztwa)], method = "spearman")
+korelacje <- round(korelacje,2)
+
+
+datatable(korelacje, 
+          options = list(
+            scrollX = TRUE, 
+            scrollY = TRUE,  
+            pageLength = 15  
+          ))
+
+```
+
+
+
+<br>
+Do policzenia korelacji została użyta metoda Spearmana, ponieważ jest mało obserwacji (15) oraz interesuje nas w szczególności korelacja między poszczególnymi rangami. Nie użyto korelacji Pearsona, ponieważ stosuje się ją do liniowej zależności. Macierz korelacji przedstawia uzyskane wyniki. Widać, że najczęściej dane są ze sobą umiarkowanie skorelowane.<br>
+W przypadku 15 cech mamy aż 105 możliwości połączenia ich w unikalne pary(nie licząc pary cechy z samą sobą).
+W tabeli przedstawiam zestawienie, ile unikalnych par przedstawia dany poziom korelacji.
+
+<br><br>
+**Tabela 4** - Poziomy korelacji
+
+```{r warning=FALSE, message=FALSE, echo=FALSE, include=FALSE}
+sum(abs(korelacje) < 0.1) / 2
+sum(abs(korelacje) >= 0.1 & abs(korelacje) < 0.3) / 2
+sum(abs(korelacje) >= 0.3 & abs(korelacje) < 0.5) / 2
+sum(abs(korelacje) >= 0.5 & abs(korelacje) < 0.7) / 2
+sum(abs(korelacje) >= 0.7 & abs(korelacje) < 0.8) / 2
+sum(abs(korelacje) >= 0.8 & abs(korelacje) < 1) / 2
+
+```
+
+```{r warning=FALSE, message=FALSE}
+
+licznosc_korelacja <- data.frame(
+  "|ρ|" = c("(0  ; 0.1)", "[0.1 ; 0.3)", "[0.3 ; 0.5)",
+                               "[0.5 ; 0.7)", "[0.7 ; 0.8)", "[0.8 ; 1)"),
+  "Liczba par" = c(28, 46, 21, 19, 4, 2 )
+)
+
+
+kable(licznosc_korelacja, col.names = c( "|ρ|", "Liczba par"),
+      align = "c")
+```
+
+<br>
+Aż 95 par ma korelację nie większą od 50%, z czego 28 ma korelację bliską 0 (mniejszą od 0.1) a więc te cechy nie są ze sobą skorelowane. Tylko 6 par jest skorelowanych na poziomie co najmniej 70%
+<br<br>
+
+**Tabela 5** - Pary najbardziej skorelowane
+
+```{r warning=FALSE, message=FALSE}
+najwieksze_korelacje <- data.frame(
+  "Para cech" = c("muzea - tereny zieleni", "pomniki - tereny zieleni",
+                  "kina - gastronomia", "stopień noclegi - gastronomia",
+                  "muzea - gastronomia", "muzea - kina"),
+  "Współczynnik korelacji" = c(0.7, 0.74, 0.74, 0.75, 0.83, 0.92 )
+)
+
+kable(najwieksze_korelacje, col.names = c( "Para cech", "Współczynnik korelacji"),
+      align = "c")
+
+```
+
+<br>
+
+Najwiekszą korelację ze wszystkich (0.92) ma para cech opisujących liczbę muzeów i kin przypadających na 1000km2. Połączenie tych cech wydaje się logiczne. Placówki gastronomiczne są dość silnie skorelowane z muzeami, kinami, a także stopniem wykorzystania miejsc noclegowych. Tutaj również nie dziwi taka korelacja cech. Tereny zieleni są natomiast skorelowane są z liczbą pomników przyrody oraz muzeami (to ostatnie połączenie cech jest nieco zaskakujące). Należy jednak pamiętać, że to, że cechy są ze sobą skorelowane, nie musi oznaczać tego, że jedna cecha zależy od drugiej. Wszystkie współczynniki korelacji tych cech są dodatnie, a więc oznacza to, że obie zmienne rosną w tym samym kierunku. Część par posiada korelację ujemną - sugeruje odwrotną monotoniczną zależność. Współczynniki korelacji ujemnej nie są jednak tak wysokie, jak dodatniej. Największy z nich wynosi -0.62 i jest między parą fundusze na ochronę środowiska i obiekty noclegowe.
+
+<br><br>
+
+**Wykres 7** - Zależności między najbardziej skorelowanymi cechami
+
+```{r warning=FALSE, message=FALSE}
+y1 <- wojewodztwa %>%
+  ggplot(aes(x = muzea, y = tereny_zieleni)) +
+  geom_point(color = "darkgreen", size = 2, alpha = 0.7) +
+  theme_bw() + 
+  labs(title = "Liczba muzeów a udział
+       terenów zieleni cor = 0.7", 
+       x = "muzea / 1000km2", 
+       y = "udział terenów zieleni [%]") +
+  theme(plot.title = element_text(size = 10),
+        axis.title.x = element_text(size = 10),
+        axis.title.y = element_text(size = 10))
+
+y2 <- wojewodztwa %>%
+  ggplot(aes(x = pomniki, y = tereny_zieleni)) +
+  geom_point(color = "darkgreen", size = 2, alpha = 0.7) +
+  theme_bw() + 
+  labs(title = "Liczba pomników przyrody a
+       udział terenów zieleni cor = 0.74", 
+       x = "pomniki / 100km2", 
+       y = "udział terenów zieleni [%]") +
+  theme(plot.title = element_text(size = 10),
+        axis.title.x = element_text(size = 10),
+        axis.title.y = element_text(size = 10))
+
+y3 <- wojewodztwa %>%
+  ggplot(aes(x = kina, y = gastronomia)) +
+  geom_point(color = "darkgreen", size = 2, alpha = 0.7) +
+  theme_bw() + 
+  labs(title = "Liczba kin a liczba
+       placówek gastronomicznych cor = 0.74", 
+       x = "kina / 1000km2", 
+       y = "placówki / 100km2") +
+  theme(plot.title = element_text(size = 10),
+        axis.title.x = element_text(size = 10),
+        axis.title.y = element_text(size = 10))
+
+
+y4 <- wojewodztwa %>%
+  ggplot(aes(x = stopien_noclegi, y = gastronomia)) +
+  geom_point(color = "darkgreen", size = 2, alpha = 0.7) +
+  theme_bw() + 
+  labs(title = "Wykorzystanie noclegów
+       a liczba placówek gastronomicznych cor = 0.75", 
+       x = "wykorzystanie miejsc [%]", 
+       y = "placówki / 100km2") +
+  theme(plot.title = element_text(size = 10),
+        axis.title.x = element_text(size = 10),
+        axis.title.y = element_text(size = 10))
+
+
+y5 <- wojewodztwa %>%
+  ggplot(aes(x = muzea, y = gastronomia)) +
+  geom_point(color = "darkgreen", size = 2, alpha = 0.7) +
+  theme_bw() + 
+  labs(title = "Liczba muzeów a liczba
+       placówek gastronomicznych cor = 0.83", 
+       x = "muzea / 1000km2", 
+       y = "placówki / 100km2") +
+  theme(plot.title = element_text(size = 10),
+        axis.title.x = element_text(size = 10),
+        axis.title.y = element_text(size = 10))
+
+
+y6 <- wojewodztwa %>%
+  ggplot(aes(x = muzea, y = kina)) +
+  geom_point(color = "darkgreen", size = 2, alpha = 0.7) +
+  theme_bw() + 
+  labs(title = "Liczba muzeów a liczba kin cor = 0.92", 
+       x = "muzea / 1000km2", 
+       y = "kina / 1000km2") +
+  theme(plot.title = element_text(size = 10),
+        axis.title.x = element_text(size = 10),
+        axis.title.y = element_text(size = 10))
+
+grid.arrange(y1, y2, y3, y4, y5, y6, ncol = 2)
+
+
+```
+
+<br>
+Wykresy punktowe pokazują zależności między danimi, które są silnie skorelowane. Widać, że faktycznie w większości przypadków wraz ze wzrostem jednej cechy, rośnie także druga (monotoniczna zależność). Najlepiej widać to tam, gdzie korelacja jest największa (między muzeami i kinami).
+
+<br>
+Dla porównania, tak prezentuje się jedna z par, która przejawia prawie zerową korelację (lesistość a liczba pomników przyrody cor = 0.01 - zaskakujące, że te dane nie są ze sobą skorelowane) Widać, że punkty nie układają się w żadną logiczną zależnośc i są po prostu chaotycznie rozrzucone.
+<br>
+
+**Wykres 8** - Zależność między danymi o prawie zerowej korelacji
+
+```{r warning=FALSE, message=FALSE}
+y7 <- wojewodztwa %>%
+  ggplot(aes(x = lasy, y = pomniki)) +
+  geom_point(color = "blue", size = 3, alpha = 0.7) +
+  theme_bw() + 
+  labs(title = "Lesitsość a liczba pomników przyrody cor = 0.01", 
+       x = "udział lasów [%]", 
+       y = "pomniki / 100km2") +
+  theme(plot.title = element_text(size = 10))
+
+y7
+
+```
+<br><br>
+Na podstawie współczynników korelacji decyduję na usunięcie ze zbioru cech jeszcze jednej zmiennej - muzea, ponieważ jest obecna w dwóch parach, które przejawiają najwyższą korelację ze wszystkich (0.92 oraz 0.83). Po eliminacjach danych w tym kroku pozostało 14 cech, które będą wykorzystane do stworzenia rankingu województw. 
+
+
+```{r warning=FALSE, message=FALSE}
+wojewodztwa <- wojewodztwa[, -which(colnames(wojewodztwa) == "muzea")]
+```
+
+
+<br><br>
+
+# **3. Porządkowanie liniowe**
+
+<br>
+W tym punkcie zostanie stworzony ranking województw pod względem atrakcyjności turystycznej wykorzystując metody porządkowania liniowego -  w tym metody bezwzorcowe (metoda standaryzowanych sum oraz metoda rang) i  wzorcowe (metoda Hellwiga oraz TOPSIS). Następnie zostanie wybrany ranking, który najlepiej opisuje zjawisko i na jego podstawie dokonana zostanie interpretacja.
+
+<br><br>
+
+## **3.1 Normalizacja i zamiana destymulant**
+
+<br><br>
+Pierwszym krokiem przed przystąpieniem do zasotsowania metod porządkowania liniowego będzie standaryzacja wszystkich cech, celem sprowadzenia ich do takich samych rzędów wielkości. Stosuję klasyczny wzór na standaryzację, który każdą cechę sprowadza do standardowego rozkładu normalnego (o wartości oczekiwanej 0 i odchyleniu standardowym 1). Wcześniej sprawdzam, czy cechy mają rozkład normalny stosując test Shapiro-Wilka na poziomie istności 0.05.<br><br>
+H0: Cecha ma rozkład normalny<br>
+H1: Cecha nie ma rozkładu normalnego<br>  
+Jeśli wartość p-value będzie mniejsza od przyjętego poziomu istotności, oznaczać będzie to odrzucenie hipotrzy zerowej.
+
+```{r warning=FALSE, message=FALSE}
+p_values <- c()
+for(i in 3:ncol(wojewodztwa))
+{
+  p_values[i - 2] <- round(shapiro.test(as.vector(wojewodztwa[[i]]))$'p.value', 2)
+}
+
+p_values
+
+```
+Jedynie w 3/14 przypadków cechy nie mają rozkładu normalnego. Decyduję się więc na zastosowanie klasycznej standaryzacji według wzoru:<br><br>
+
+\[
+z_{ij} = \frac{x_{ij} - \bar{x_j}}{s_j}
+\]
+
+<br><br>
+
+**Tabela 6** - Dane zestandaryzowane
+
+```{r warning=FALSE, message=FALSE}
+stand_wojewodztwa <- wojewodztwa
+
+for(i in 3:ncol(wojewodztwa))
+{
+  srednia <- mean(wojewodztwa[[i]])
+  odchylenie <- sd(wojewodztwa[[i]])
+  
+  stand_wojewodztwa[[i]] <- round( (wojewodztwa[[i]] - srednia) / odchylenie, 2)
+}
+
+```
+
+<br>
+Po standaryzacji zamieniono destymulanty (emisja pyłów na 1km2 oraz powierzchnia dzikich wysypisk na 1km2) na stymulanty poprzez zmianę ich znaku.
+
+```{r warning=FALSE, message=FALSE}
+stand_wojewodztwa$emisja_pylow <- -stand_wojewodztwa$emisja_pylow
+stand_wojewodztwa$wysypiska <- -stand_wojewodztwa$wysypiska
+
+datatable(stand_wojewodztwa[,2:ncol(stand_wojewodztwa)], 
+          options = list(
+            scrollX = TRUE,  
+            pageLength = 16  
+          ))
+```
+
+
+<br><br>
+
+## **3.2 Metoda standaryzowanych sum**
+
+<br><br>
+Metoda standaryzowanych sum polega na dodaniu wszystkich wartości zestandaryzowanych zmiennych dla każdego województwa osobno. W ten sposób otrzymano wartości zmiennej syntetycznej, które następnie sprowadzono do przedziału [0,1] stosując wzór na unitaryzację i uszeregowano, tworząc ranking.
+
+<br><br>
+
+**Tabela 7** - Ranking metodą standaryzowanych sum
+
+
+```{r warning=FALSE, message=FALSE}
+WSK_sumy <- apply(stand_wojewodztwa[, 3:ncol(stand_wojewodztwa)], 1, sum )
+
+
+WSK_sumy_unit <- round((WSK_sumy - min(WSK_sumy)) / (max(WSK_sumy) - min(WSK_sumy)),3)
+
+
+standaryzowane_sumy <- data.frame(matrix(nrow = 16, ncol = 4))
+colnames(standaryzowane_sumy) <- c("Wojewodztwo", "WSK_s", "WSK", "Ranking_s")
+standaryzowane_sumy$Wojewodztwo <- wojewodztwa$nazwa
+standaryzowane_sumy$WSK_s <- WSK_sumy
+standaryzowane_sumy$WSK <- WSK_sumy_unit
+standaryzowane_sumy$Ranking_s <- rank(-standaryzowane_sumy$WSK_s)
+
+standaryzowane_sumy <- standaryzowane_sumy %>%
+  arrange(Ranking_s)
+
+kable(standaryzowane_sumy)
+
+```
+
+<br><br>
+
+## **3.3 Metoda rang**
+
+<br><br>
+Jest to jedyna metoda, w której nie będą używane standaryzowane zmienne, ale pierwotne wartości cech. Polega ona na nadaniu rang w ramach każdej cechy, a następnie zsumowaniu ich aby otrzymać wskaźnik syntetyczny. Rangując w taki sposób, że największa obserwacja otrzymuje największą rangę, czym wyższy jest wskaźnik, tym lepsze miejsce w rankingu powinno mieć dane województwo. Ponownie dla lepszego prównania różnic między cechami unitaryzuję wartość zmiennej syntetycznej. W przypadku takiej samej wartości sumy rang, nadano województwom miejsca ex aequo licząc średnią z dwóch miejsc.
+
+<br>
+**Tabela 8** - Ranking metodą rang
+
+```{r warning=FALSE, message=FALSE}
+rangi_wojewodztwa <- wojewodztwa
+
+for(i in 3:ncol(wojewodztwa))
+{
+  rangi_wojewodztwa[,i] <- rank(rangi_wojewodztwa[,i])
+}
+
+WSK_rangi <- apply(rangi_wojewodztwa[, 3:ncol(stand_wojewodztwa)], 1, sum )
+WSK_rangi_unit <- round((WSK_rangi - min(WSK_rangi)) / (max(WSK_rangi) - min(WSK_rangi)),3)
+
+
+sumy_rang <- data.frame(matrix(nrow = 16, ncol = 4))
+colnames(sumy_rang) <- c("Wojewodztwo", "Suma_rang", "WSK", "Ranking_r")
+sumy_rang$Wojewodztwo <- wojewodztwa$nazwa
+sumy_rang$Suma_rang <- WSK_rangi
+sumy_rang$WSK <- WSK_rangi_unit
+sumy_rang$Ranking_r <- rank(-sumy_rang$Suma_rang)
+
+sumy_rang <- sumy_rang %>%
+  arrange(Ranking_r)
+
+kable(sumy_rang)
+```
+
+
+<br><br>
+
+## **3.4 Metoda Hellwiga**
+
+<br><br>
+
+Jest metodą wzorcową i polega na policzeniu odległości każdej obserwacji od pewnego przyjętego wzorca, który jest najlepszym obiektem pod każdym względem. Wzorzec jest wyznaczany jako maksymalna wartość dla każdej cechy. Następnie obliczane są odległości od ustalonego wzorca (w badaniu przyjęto odległość euklidesową). Następnie obliczany jest wskaźnik według wzoru:<br> **WSK = 1 - (d+ / d0)** gdzie d+ to odległość od wzorca, a d0 to dostatecznie duża odległość. Otrzymane tym sposobem wartości zmiennej syntetycznej służą do ułożenia rankingu.
+
+<br>
+**Tabela 9 ** - Ranking metodą Hellwiga 
+
+```{r warning=FALSE, message=FALSE}
+wzorzec <- apply(stand_wojewodztwa[, 3:ncol(stand_wojewodztwa)], 2, max)
+stand_cechy <- stand_wojewodztwa[,3:ncol(stand_wojewodztwa)]
+
+odleglosci <- c()
+
+for(i in 1:16) {
+  odleglosci[i] <- sqrt(sum((stand_cechy[i, ] - wzorzec)^2))
+}
+
+d0 <- mean(odleglosci)+ 2*sd(odleglosci)
+
+WSK_H <- round(1 - (odleglosci / d0) , 4)
+
+
+metoda_hellwig <- data.frame(matrix(nrow = 16, ncol = 3))
+colnames(metoda_hellwig) <- c("Wojewodztwo", "WSK_H", "Ranking_H")
+metoda_hellwig$Wojewodztwo <- wojewodztwa$nazwa
+metoda_hellwig$WSK_H <- WSK_H
+metoda_hellwig$Ranking_H <- rank(-metoda_hellwig$WSK_H)
+
+metoda_hellwig <- metoda_hellwig %>%
+  arrange(Ranking_H)
+
+kable(metoda_hellwig)
+```
+
+
+<br><br>
+
+## **3.5 Metoda TOPSIS**
+
+<br><br>
+
+Metoda ta jest również metodą wzorcową, jednak oprócz odległości od wzorca, bierze się w niej pod uwagę także odległość obserwacji od antywzorca, czyli obiektu najgorszego pod każdym względem. Wyznacza się go analogicznie jak wzorzec - tym razem bierze się pod uwagę wartości najmniejsze dla każdej cechy. Wartość wskaźnika wyznacza się jako<br> **WSK = d- / (d- + d+)** gdzie d+ i d- to odpowiednio wzorzec i antywzorzec<br><br>
+
+W metodzie TOPSIS standaryzuje się zmienne w inny sposób. Każdą obserwację dzieli się przez pierwiastek z sumy kwadratów wartości danej cechy. Poniżej w tabeli przedstawione są zestandaryzowane dane dla metody TOPSIS:
+
+<br><br>
+**Tabela 10** - Dane zestandaryzowane w metodzie TOPSIS
+
+
+```{r warning=FALSE, message=FALSE}
+stand_topsis <- wojewodztwa[, 3:ncol(wojewodztwa)]
+suma_kw_kol <- apply(stand_topsis, 2, function(x) sum(x^2))
+
+
+for (i in 1:ncol(stand_topsis)) {
+  stand_topsis[, i] <- round(stand_topsis[, i] / sqrt(suma_kw_kol[i]), 3)
+}
+
+datatable(stand_topsis, 
+          options = list(
+            scrollX = TRUE,  
+            pageLength = 16  
+          ))
+```
+
+<br>
+**Tabela 11** - Ranking metodą TOPSIS
+
+```{r warning=FALSE, message=FALSE}
+wzorzec_topsis <- apply(stand_topsis[,1:ncol(stand_topsis)], 2, max)
+# na odwrót dla destymulant:
+wzorzec_topsis[5] <- min(stand_topsis$emisja_pylow)
+wzorzec_topsis[6] <- min(stand_topsis$wysypiska)
+
+antywzorzec_topsis <- apply(stand_topsis[,1:ncol(stand_topsis)], 2, min)
+# na odwrót dla destymulant:
+antywzorzec_topsis[5] <- max(stand_topsis$emisja_pylow)
+antywzorzec_topsis[6] <- max(stand_topsis$wysypiska)
+
+odleglosci_wzorzec <- c()
+
+for(i in 1:16)
+{
+  odleglosci_wzorzec[i] <- sqrt(sum((stand_topsis[i, ] - wzorzec_topsis)^2))
+}
+  
+
+odleglosci_antywzorzec <- c()
+
+for(i in 1:16)
+{
+  odleglosci_antywzorzec[i] <- sqrt(sum((stand_topsis[i, ] - antywzorzec_topsis)^2))
+}
+
+WSK_t <- round(odleglosci_antywzorzec / (odleglosci_wzorzec + odleglosci_antywzorzec),3)
+
+
+metoda_topsis <- data.frame(matrix(nrow = 16, ncol = 3))
+colnames(metoda_topsis) <- c("Wojewodztwo", "WSK_t", "Ranking_t")
+metoda_topsis$Wojewodztwo <- wojewodztwa$nazwa
+metoda_topsis$WSK_t <- WSK_t
+metoda_topsis$Ranking_t <- rank(-metoda_topsis$WSK_t)
+
+metoda_topsis <- metoda_topsis %>%
+  arrange(Ranking_t) 
+
+kable(metoda_topsis)
+```
+
+
+<br><br>
+
+## **3.6 Ocena poprawności rankingów**
+
+<br><br>
+Przyjrzyjmy się teraz, jak przedstawiają się wyniki rankingów wyznaczanych wszystkimi czteroma metodami. Należy zbadać, czy te rankingi są do siebie podobne.
+
+<br><br>
+**Tabela 12** - Wszystkie rankingi
+
+```{r warning=FALSE, message=FALSE}
+ranking_s <- standaryzowane_sumy[, -2:-3]
+ranking_r <- sumy_rang[, -2:-3]
+ranking_h <- metoda_hellwig[,-2]
+ranking_t <- metoda_topsis[, -2]
+
+rankingi_all <- left_join(ranking_s, ranking_r, by = "Wojewodztwo")
+rankingi_all <- left_join(rankingi_all, ranking_h, by = "Wojewodztwo")
+rankingi_all <- left_join(rankingi_all, ranking_t, by = "Wojewodztwo")
+
+kable(rankingi_all)
+```
+
+<br><br>
+Aby sprawdzić stabilność wyników dla różnych metod, warto policzyć współczynnik korelacji Kendalla między poszczególnymi rankingami. Korelacja powinna być wysoka, bo wszystkie metody powinny dawać podobne rezultaty.
+
+<br><br>
+**Tabela 13** - Korelacja Kendalla między rankingami
+
+```{r warning=FALSE, message=FALSE}
+korelacje_rankingi <- round(cor(rankingi_all[, 2:ncol(rankingi_all)], method = "kendall"), 2)
+
+kable(korelacje_rankingi)
+```
+
+<br>
+
+Większość współczynników korelacji jest dość wysoka, ale żaden z nich nie osiąga poziomu 0.9.  Najbardziej skorelowane ze sobą są ranking metodą standaryzowanych sum oraz metodą Hellwiga (0.85). Najgorzej skorelowane są ze sobą ranking metodą rang i TOPSIS. Korelacja wynosi tutaj zaledwie 0.39. Jest to wynik zaskakujący, tym bardziej, że oba te rankingi przejawiają całkiem duże korelacje ze wszystkimi pozostałymi rankingami (korelacja większa niż 0.6 z każdym innym rankingiem)<br><br>
+W TOP5 zawsze znajdują się województwa: małopolskie, pomorskie i  śląskie. Ranking na pięciu najgorszych miejsach zawsze zamykają: podlaskie i lubuskie. Pozostałe województwa oscylują gdzieś pomiędzy nimi. Zdarzają się zadziwiające przypadki np. województwo podkarpackie według TOPSIS miejsce 4, a według metody rang miejsce 12, województwo opolskie wg. Hellwiga miejsce 16, a według metodu rang miejsce 10 lub województwo dolnośląskie według dwóch rankingów miejsce 3, a według TOPSIS miejsce 9. <br><br>
+Ciężko interpretować wyniki na podstawie 4 różnych rankingów. Wybór ostatecznego rankingu umożliwia miara podobieństwa rankingów. Czym wyższa jest miara, tym bardziej dany ranking jest podobny do wszystkich pozostałch. ["Ranking województw ze względu na potencjał rolnictwa" (Joanna Kisielińska)] Należy wybrać więc ten, który charakteryzuje się największym podobieństwem do innych. Miarę podobieństwa rankingów policzono według wzoru:
+
+<br><br>
+**Tabela 14** - Miara podobieństwa rankingów
+
+```{r, echo=FALSE, message=FALSE, warning=FALSE, out.width = "75%", out.height = "50%"}
+knitr::include_graphics("C:/Studia/Semestr 5/Statystyczna analiza danych/Projekt1/miara.png")
+
+```
+
+
+```{r warning=FALSE, message=FALSE}
+oblicz_up <- function(nr_rankingu, dane)
+{
+  n <- nrow(dane) 
+  v <- ncol(dane)  
+  z <- ifelse(n %% 2 == 0, 0, 1)
+  suma <- 0
+  
+  for (q in seq_len(v))
+  {
+    if (q != nr_rankingu)
+    {
+      roznice <- abs(dane[, nr_rankingu] - dane[, q])
+      przeksztalcenie <- 1 - (2*sum(roznice) / (n^2 - z))
+      suma = suma + przeksztalcenie
+    }
+  }
+  
+  up <- suma / (v - 1)
+  
+  return(up)
+}
+
+
+oblicz_up_wszystkie <- function(dane)
+{
+  v <- ncol(dane)
+  wyniki <- numeric(v)
+  
+  for (nr_rankingu in seq_len(v))
+  {
+    wyniki[nr_rankingu] <- oblicz_up(nr_rankingu, dane)
+  }
+  
+  return(wyniki)
+}
+
+miara_podobienstwa <- round(oblicz_up_wszystkie(rankingi_all[,2:ncol(rankingi_all)]),4)
+
+miara_podobienstwa <- data.frame(
+  "Ranking" = c("Sum", "Rang", "Hellwiga", "TOPSIS"),
+  "Miara podobieństwa" = miara_podobienstwa
+)
+
+kable(miara_podobienstwa)
+```
+
+<br>
+Wszystkie rankingi mają zbliżoną do siebie miarę podobieństwa. Metoda Hellwiga oraz standaryzowanych sum są wg. tego kryterium najlepsze i osiągają wynik prawie 0.8. Te dwie metody wykazywały również największą korelację między sobą. Do dalszej interpretacji służyć będzie ranking wyznaczony metodą Hellwiga.
+<br>
+
+## **3.7 Interpretacja wyników**
+
+<br><br>
+Na podstawie uzyskanych wyników województwa można podzielić na 4 grupy, biorąc pod uwagę średnią i odchylenie standardowe uzyskanej miary syntetycznej.
+
+```{r warning=FALSE, message=FALSE}
+srednia_h <- mean(metoda_hellwig$WSK_H)
+odchylenie_h <- sd(metoda_hellwig$WSK_H)
+
+gr1 <- metoda_hellwig %>%
+  filter(WSK_H > srednia_h + odchylenie_h)
+
+gr2 <- metoda_hellwig %>%
+  filter(WSK_H > srednia_h & WSK_H < srednia_h + odchylenie_h)
+
+gr3 <- metoda_hellwig %>%
+  filter(WSK_H > srednia_h - odchylenie_h &  WSK_H < srednia_h)
+
+gr4 <- metoda_hellwig %>%
+  filter(WSK_H < srednia_h - odchylenie_h)
+
+```
+
+<br>
+
+**Grupa 1** (województwa o najwyższej atrakcyjności turystycznej): **małopolskie, pomorskie** <br>
+**Grupa 2** (województwa o ponadprzeciętnym wskaźniku atrakcyjności turystycznej): **dolnośląskie, śląskie, zachodniopomorskie, mazowieckie, wielkopolskie, kujawsko-pomorskie**<br>
+**Grupa 3** (województwa o przeciętnym wskaźniku atrakcyjności turystycznej): **łódzkie, podkarpackie, lubelskie, podlaskie, świętokrzyskie** <br>
+**Grupa 4** (województwa o niskim wskaźniku atrakcyjności turystycznej): **warmińsko-mazurkie, lubuskie, opolskie**
+
+<br><br>
+
+Grupy przedstawiono również na mapie administracyjnej Polski w celu lepszego zrozumienia położenia poszczególnych grup województw.
+
+<br><br>
+**Wykres 9 ** - Grupy województw na podstawie rankingu
+
+```{r warning=FALSE, message=FALSE}
+grupy_wojewodztw <- data.frame(
+  "name_alt" = c("Dolnoslaskie", "Kujawsko-Pomorskie", "Lubelskie",
+                            "Lubuskie", "Lódzkie", "Malopolskie", "Mazowieckie",
+                            "Opolskie", "Podkarpackie", "Podlaskie", "Pomorskie",
+                            "Slaskie", "Swietokrzyskie", "Warminsko-Mazurskie",
+                            "Wielkopolskie", "Zachodniopomorskie"
+                            ),
+  grupa = c(2, 2, 3, 4, 3, 1, 2, 4, 3, 3, 1, 2, 3, 4, 2, 2)
+)
+
+poland <- left_join(poland, grupy_wojewodztw, by = "name_alt")
+
+g1 <- ggplot(data = poland) +
+  geom_sf(aes(fill = factor(grupa))) +  
+  theme_minimal() + 
+  scale_fill_manual(values = c("1" = "darkgreen", 
+                               "2" = "#7ebf3f",    
+                               "3" = "#bbe691",    
+                               "4" = "#f0f4c3")) +   
+  labs(title = "Województwa z podziałem na grupy wg. wskaźnika atrakcyjności turystycznej",
+       fill = "Grupa") +
+  theme(plot.title = element_text(size = 12),
+        legend.title = element_text(size = 10))
+
+g1
+
+```
+
+Najlepsze pod względem turystycznym okazały się województwa małopolskie i pomorskie. Można było spodziewać się tego, że będą wysoko w rankingu, już po wstępnym oglądaniu cech na początku pracy. Oba te województwa posiadały wiele wyróżniających się cech zarówno jeśli chodzi o środowisko naturalne, walory kulturowe i rekreacyjne i infrastrukturę. Nie dało się jednoznacznie wybrać jednej kategorii, w której byłby najlepsze, ponieważ wykazywały wysokie wyniki dla różnych cech. Do ponadprzeciętnej grupy należą głównie województwa z zachodu i centrum kraju. Przeciętny poziom atrakcyjności prezentuje głównie wschód Polski. Trzy najsłabsze pod względem turystycznym województwa - warmińsko-mazurskie, lubuskie i opolskie były słabe we wszystkich trzech kategoriach, szczególnie jednak dwóch z nich - walorach kulturowych i rekreacyjnych oraz infrastrukturze. <br><br>
+Bardziej szczegółowo cechy, które różnią poszczególne grupy można przedstawić na wykresach radarowych. Dzięki nim widać dokładnie, jakie wyniki osiągnęło dane województwo dla każdej z cech. Można łatwo wyciągnąć wnioski w czym dane województwo góruje nad innymi, a w czym musi się poprawić. Aby dane były w tej samej skali i łatwo można było przedstawić je na wykresie, dokonano unitaryzacji danych. Dzięki temu wszystkie cechy osiągają wartości z zakresu [0,1], gdzie 0 oznacza najsłabszą a 1 najlepszą obserwację.
+
+<br><br>
+Porównanie dwóch najlepszych województw na wykresie radarowym:
+
+<br><br>
+**Wykres 10** - Wykres radarowy najlepszych województw
+
+```{r warning=FALSE, message=FALSE}
+unit_wojewodztwa <- wojewodztwa
+
+for(i in 3:ncol(wojewodztwa))
+{
+  min <- min(wojewodztwa[[i]])
+  max <- max(wojewodztwa[[i]])
+  
+  unit_wojewodztwa[[i]] <- round( (wojewodztwa[[i]] - min) / (max-min), 2)
+}
+unit_wojewodztwa$wysypiska <- 1 - unit_wojewodztwa$wysypiska
+unit_wojewodztwa$emisja_pylow <- 1 - unit_wojewodztwa$emisja_pylow
+
+
+malopolskie <- unit_wojewodztwa[6, 3:ncol(wojewodztwa)]
+pomorskie <- unit_wojewodztwa[11, 3:ncol(wojewodztwa)]
+
+max_values <- rep(1, 14)  
+min_values <- rep(0, 14)  
+
+radar_malo_mazo <- rbind(max_values, min_values, malopolskie, pomorskie)
+
+radarchart(radar_malo_mazo, 
+           axistype = 1,        
+           pcol = c("#66CC0099", "#0033CC99"),
+           plwd = 2,            
+           plty = 1,          
+           title = "Cechy województw małopolskiego i mazowieckiego",
+           cglcol = "grey",   
+           cglty = 1,     
+           axislabcol = "black",   
+           caxislabels = seq(0, 1, 0.25), 
+           vlcex = 0.8        
+)
+
+legend(x = "topright", legend = c("Małopolskie", "Pomorskie"), 
+       col = c("#66CC0099", "#0033CC99"),
+       pch = 20, bty = "n", pt.cex = 2, cex = 0.8, text.col = "black")
+```
+
+Widać, że pomimo osiągnięcia najlepszych wyników w rankingu, oba województwa różnią się od siebie. Małopolska jest najlepsza jeśli chodzi o lasy, tereny zieleni, pomniki przyrody i wysypiska (środowisko naturalne), ale w tej kategorii wypada słabiej pod względem emisji pyłów i funduszy na occhronę środowiska. Jeśli chodzi o infrasturkturę, to ma ją dobrze rozwiniętą (placówki gastronomiczne, obiekty noclegowe, komunikacja miejska). Najgorzej wypada pod względem kultury i rekreacji - jedynie kina są na wysokim poziomie.<br>
+Województwo mpomorskie jest gorsze od małopolski pod względem środowiskowym - wypada zacząco lepiej jedynie w jednej z sześciu cech (emisja pyłów). Jest niemal identyczne jeśli chodzi o pomniki przyrody i fundusze na ochronę środowiska. Województwo pomorskie jest bardzo podobnie rozwinięte pod względem infrastruktury - lekko przewyższa obiekty noclegowe, a pozostałe cechy się ze sobą pokrywają. Kultura i rekracja oprócz ogrodów zoologicznych i botanicznych także nie jest mocną stroną Pomorza (tak jak i Małopolski).
+
+<br><br>
+Porównanie najgorszych województw na wykresie radarowym:
+
+<br><br>
+**Wykres 11** - Wykres radarowy najgorszych województw
+
+```{r warning=FALSE, message=FALSE}
+
+warminsko_mazurskie <- unit_wojewodztwa[14, 3:ncol(wojewodztwa)]
+lubuskie <- unit_wojewodztwa[4, 3:ncol(wojewodztwa)]
+
+radar_warm_lubu <- rbind(max_values, min_values, warminsko_mazurskie, lubuskie)
+
+radarchart(radar_warm_lubu, 
+           axistype = 1,        
+           pcol = c("#0033CC99", "#66CC0099"),
+           plwd = 2,            
+           plty = 1,          
+           title = "Cechy województw warmińsko-mazurskiego i lubuskiego",
+           cglcol = "grey",   
+           cglty = 1,     
+           axislabcol = "black",   
+           caxislabels = seq(0, 1, 0.25), 
+           vlcex = 0.8        
+)
+
+legend(x = "topright", legend = c("Warmińsko-mazurskie", "Lubuskie"), 
+       col = c("#0033CC99", "#66CC0099"),
+       pch = 20, bty = "n", pt.cex = 2, cex = 0.8, text.col = "black")
+```
+
+Województwo opolskie miało najsłabsze miejsce (16) wg. rankingu stworzonego metodą Hellwiga, ale w innych rankingach wykazywało wyższe miejsca(9, 10 lub 14). Z tego powodu na wykresie przedstawiono województwa z miejsc 14 i 15, które również zostały przydzielone go grupy 4 (lubuskie i warmińsko-mazurskie). <br><br>
+Oba województwa wypadają bardzo podobnie. Widać, że są bardzo słabe większości z z 14 cech. Oba wyróżniają się pozytywnie pod względem środowiskowym jeśli chodzi o wysypiska i emisję pyłów, a woj. lubuskie jeszcze dodatkowo w funduszach na ochronę środowiska. Oba mają przeciętny wynik dla pomników przyrody.  Warmińsko-mazurskie jest jeszczem przeciętne biorąc pod uwagę obiekty noclegowe. W pozostałych cechach oba województwa są słabe i mają zbliżone do siebie wyniki.
+
+<br><br>
+Poprzednie wykresy radarowe prezentowały skrajne przypadki - dla najlepszych i najgorszych województw. Warto jeszcze zobaczyć, jak prezentują się przeciętne województwa. Tym razem na wykresie zostaną zwizualizowane województwa z grupy 2(zachodniopomorskie) i 3(podkarpackie)
+
+<br><br>
+**Wykres 12** - Wykres radarowy przeciętnych województw
+
+```{r warning=FALSE, message=FALSE}
+zachodniopomorskie <- unit_wojewodztwa[16, 3:ncol(wojewodztwa)]
+podkarpackie <- unit_wojewodztwa[9, 3:ncol(wojewodztwa)]
+
+radar_zacho_podk <- rbind(max_values, min_values, zachodniopomorskie, podkarpackie)
+
+radarchart(radar_zacho_podk, 
+           axistype = 1,        
+           pcol = c("#0033CC99", "#66CC0099"),
+           plwd = 2,            
+           plty = 1,          
+           title = "Cechy województw zachodniopomorskiego i podkarpackiego",
+           cglcol = "grey",   
+           cglty = 1,     
+           axislabcol = "black",   
+           caxislabels = seq(0, 1, 0.25), 
+           vlcex = 0.8        
+)
+
+legend(x = "topright", legend = c("Zachodniopomorskie", "Podkarpackie"), 
+       col = c("#0033CC99", "#66CC0099"),
+       pch = 20, bty = "n", pt.cex = 2, cex = 0.8, text.col = "black")
+
+```
+
+Między tymi województwami widać największe różnice - pochodzą z dwóch różnych grup. Ciężko jednak jednoznacznie na podstawie wykresu przyznać, które z nich jest atrakcyjniejsze, gdyż bardzo różnią się cechami. Województwo podkarpackie (gr3) ma wiele słabszo wypadających cech przede wszystkim w infrastrukturze. Wyróżnia sią pozytywnie wszystkimi cechami z kategorii środowiskowych oprócz funduszy na ochronę środowiska. Województwo zachodniopomosrkie (gr2) jest natomiast lepsze niż podkarpackie we wszystkich cechach związanych z infrastrukturą i kulturą. Słabo wypada jeśli chodzi o środowisko naturalne. Dla wielu cech można by powiedzieć,  że te województwa są swoimi przeciwieństwami. W rankingu oba są całkiem atrakcyjne turystycznie, jednak dopiero na wykresie radarowym dokładnie widać, że wyróżniają się pod zupełnie innymi względami. 
+
+<br><br><br>
+
+# **3. Analiza skupień**
+
+<br><br>
+Celem tej części badania jest podzielenie województw na grupy(klasy) tak, aby obiekty przypisane do tej samej grupy były możliwie najbardziej do siebie podobne. Jednocześnie grupy powinny być od siebie jak najbardziej odmienne. Wówczas będzie można łatwo je opisać i scharakteryzować czym różnią się grupy i w czym są do siebie podobne obiekty w obrębie tej samej klasy.
+
+<br><br>
+Analiza skupień składa się z kilku etapów. Pierwsze z nich już zostały wykonane przy okazji przygotowywania danych do porządkowania liniowego:<br>
+**1. Wybór obiektów i zmiennych** - mamy już wybrane dane dotyczące 14 cech dla 16 województw Polski. Wszystkie mają współczynnik zmienności powyżej 10% oraz nie są współliniowe. Wartości odstające zostały również podmienione na wcześniejszym etapie. Dane są przygotowowane do kolejnych etapów.<br>
+**2. Wybór formuły normalizacji wartości zmiennych** - zmienne już zostały zestandaryzowane, a więc wszystkie mają standardowy rozkład normalny.<br>
+**3. Wybór miary odległości** - tak samo jak w porządkowaniu liniowym do tego badania zostanie wykorzystana klasyczna odległość euklidesowa.<br>
+**4. Wybór metody klasyfikacji** - badanie zostanie przeprowadzone dwoma metodami, a wyniki porównane. Zastosowane zostanie grupowanie podziałowe (metodą k-średnich) oraz grupowanie hierarchiczne (metodą aglomeracyjną). W ramach metody aglomeracyjnej trzeba wybrać także metodę, w jaki sposób będą liczone odległości między punktami łączącymi się w grupy.<br>
+**5. Ustalenie liczby klas** - w metodzie k-średnich trzeba podać z góry liczbę klas, na którą zostaną podzielone dane. W metodzie aglomeracyjnej robi się to na końcu. W obu jednak przypadkach badacz musi zdecydować, na ile grup chce, aby dane zostały podzielone. Częściowo jest to wybór subiektywny, ale zostanie podparty również odpowiednimi wskaźnikami (indeksami), które do tego służą.<br>
+**6. Interpretacja i profilowanie klas** - punkt najważniejszy w tym badaniu. Ma on nma celu opisanie wyników, które dostarczyła analiza skupień. Nacisk powinien być kładziony na wskazanie cech charakterystycznych poszczególnych grup oraz wskazanie różnic między nimi. To dopiero ten punkt pozwala zrozumieć wszystko to, czego dostarczyły algorytmy analizy skupień.
+
+```{r warning=FALSE, message=FALSE}
+# muszę zamienić destymulanty z powrotem na pierwotne wartości
+skupienia_stand <- stand_wojewodztwa
+skupienia_stand$emisja_pylow <- -skupienia_stand$emisja_pylow
+skupienia_stand$wysypiska <- -skupienia_stand$wysypiska
+skupienia_stand <- skupienia_stand[, 3:ncol(skupienia_stand)]
+
+```
+
+## **3.1 Grupowanie podziałowe**
+
+<br><br>
+Ten rodzaj grupowania polega na podziale zbioru obiektów na określoną przed początkiem badania liczbę klas.
+
+### **3.1a Wybór liczby klas**
+
+<br><br>
+
+Zanim wykorzystanie zostany algorytm k-means, należy zdecydować o liczbie klas. Można to zrobić na wiele sposobów.
+
+<br>
+Metoda łokcia (elbow method) - jest graficzną metodą znajdywania najbardziej optymalnej liczby grup. Korzysta z sumy kwadratów odległości poszczególnych obserwacji od centroidów. Najlepszym wyborem według tej metody będzie taka liczba grup, przy której jest widoczne znaczny spadek sumy kwadratów – czyli dodanie kolejnej grupy nie przynosi już dużych korzyści.<br><br>
+
+**Wykres 10** - Wykres metody łokcia
+
+```{r warning=FALSE, message=FALSE}
+fviz_nbclust(skupienia_stand , kmeans, method = "wss") + 
+  labs(
+    title = "Metoda łokcia",
+    y = "suma kwadratów odległości",
+    x = "liczba grup",
+  )
+```
+<br><br>
+Nie ma widocznego spadku sumy kwadratów odległości między żadnymi grupami oprócz grupy 1 a 2. Według tego wykresu najlepiej byłoby podzielić więc województwa na 2 klasy. Uważam jednak, że jest to za mała liczba klas, aby przyniosła ona oczekiwane informacje o danych. Decyduję na sprawdzenie kolejnych innych metod.<br><br>
+
+Indeksy, których wartość max wskazuje najlepszą liczbe grup:<br>
+-Indeks G1 (Calińskiego i Harabasza)<br>
+-Indeks G2 (Bakera i Hubera)<br>
+-Indeks Silhouette<br><br>
+
+Indeksy, których wartość min wskazuje najlepszą liczbę grup:<br>
+-Indeks G3 (Huberta i Levine'a)<br>
+-Indeks DB(Daviesa i Bouldina)
+
+<br>
+
+**Wykres 11** - Wartości indeksów
+
+```{r message=FALSE, warning=FALSE}
+G1 <- c()
+G2 <- c()
+S <- c()
+
+G3 <- c()
+DB <- c()
+
+for (i in 1:8)
+{
+  km <- kmeans(skupienia_stand, centers = i, nstart = 100 )
+  G1[i] <- index.G1(skupienia_stand, km$cluster)
+  G2[i] <- index.G2(dist(skupienia_stand), km$cluster)
+  S[i] <- index.S(dist(skupienia_stand), km$cluster)
+  G3[i] <- index.G3(dist(skupienia_stand), km$cluster)
+  DB[i] <- index.DB(skupienia_stand, km$cluster)
+
+}
+
+G1 <- G1[2:8]
+G2 <- G2[2:8]
+S <- S[2:8]
+G3 <- G3[2:8]
+
+DB <- unlist(DB)
+DB <- DB[2:8]
+
+
+indeksy <- data.frame(
+  x = rep(2:8, 5),
+  y = c(G1, G2, S, G3, DB),
+  Indeks = rep(c("G1", "G2", "Silhouette", "G3(min)", "DB(min)"), each = 7)
+)
+
+
+ggplot(indeksy, aes(x = x, y = y, color = Indeks)) +
+  geom_line(linewidth = 0.8) +
+  geom_point(size = 2) + 
+  labs(
+    title = "Wykres indeksów",
+    x = "Liczba grup",
+    y = "Wartość indeksy") + 
+  theme_bw() +
+  scale_x_continuous(limits = c(2, 8), n.breaks = 8)
+
+
+```
+<br><br>
+Dla indeksów G1, G2 oraz Silhouette szukamy maksimum, natomiast dla indeksów G3 i DB szukamy minimum. Indeksy dają różne między sobą informacje:<br>
+-G1 wskazuje zdecydowanie liczbę grup 2<br>
+-G2 wskazuje aż 8 grup (począwszy od 2 grup jego wartości rosną nieznacznie z każdą kolejną grupą)<br>
+-Silhouette wskazuje 2 lub 4 grupy (różnica wartości indeksu między tymi miejscami wynosi 0.005), ale jego wartości dla wszystkich grup od 2 do 8 różnią się bardzo nieznacznie<br>
+-G3 wskazuje 3 grupy<br>
+-DB wskazuje 8 grup<br><br>
+
+Informacje, które niosą nam indeksy są bardzo skrajne. Powtarzające się odpowiedzi to 2 lub 8. W obu tych przypadkach wydaje się jednak, że taki podział na grupy nie da zadowalających efektów. 2 grupy będą może mocno różniły się między sobą, ale mogą pozostawać wewnętrznie niespójne i nie pozwolić prosto scharakteryzować każdej grupy. 8 grup natomiast może pozwolić na zgrupowanie razem bardzo podobnych obiektów, ale wówczas klasy nie będą się znacząco różniły między sobą. Dodatkowo będzie tych klas za dużo, by je zapamiętać. Żadne z tych podejść nie wydaje się rozsądne. Dlatego decyduję się na liczbę grup równą 3. Wartość ta pojawiła się dla indeksu G3 oraz była bliska maksimum także w indeksie Silhouette.
+
+
+<br><br>
+
+### **3.1b Przyporządkowanie do klas**
+
+<br><br>
+
+**Tabela 13** - Przyporządkowanie województw do klas alogrytmem k-means
+
+```{r warning=FALSE, message=FALSE}
+kmeans <- kmeans(skupienia_stand, centers = 3, nstart = 100)
+
+grupy_rankingowe <- data.frame(
+  nazwa = wojewodztwa$nazwa,
+  Gr_ranking <- c(2, 2, 3, 4, 3, 1, 2, 4, 3, 3, 1, 2, 3, 4, 2, 2)
+)
+
+wojewodztwa_kmeans <- cbind(wojewodztwa, kmeans$cluster)
+wojewodztwa_kmeans <- left_join(wojewodztwa_kmeans, grupy_rankingowe, by = "nazwa")
+
+colnames(wojewodztwa_kmeans)[17] <- "Klasa_kmeans"
+colnames(wojewodztwa_kmeans)[18] <- "Gr_ranking"
+
+
+wojewodztwa_kmeans <- wojewodztwa_kmeans %>%
+  arrange(Klasa_kmeans)
+
+
+kable(wojewodztwa_kmeans[, c(2,17,18)])
+```
+
+<br>
+Algorytm grupowania podziałowego k-means podzielił województwa na dwie średnie i jedną większą grupę. Największa grupa ma przyporządkowane 7 województw, a pozostałe 4 i 5. W tabeli przedstawiono również grupy województw, które zostały wyznaczone przy okazji porządkowania liniowego i ustalania rankingu. Przypominając - czym wyższa wartość grupy, tym lepiej. Porządek grup w metodzie kemans nie ma natomiast żadnego znaczenia, numery po prostu odróżniają od siebie poszczególne grupy.
+
+
+<br><br>
+
+### **3.1c Interpretacja i profilowanie klas**
+
+<br><br>
+Jedną grupę województw stanowią województwa: **śląskie, dolnośląskie, pomorskie, zachodniopomorskie oraz kujawsko-pomorskie.** Już na pierwszy rzut oka widać, że do tej grupy należą województwa z północy związane z pomorzem oraz województwa na Śląsku. W rankingu województw wszystkie wykazywały się ponadprzeciątnym wskaźnikiem atrakcyjności turystycznej, a województwo pomorskie miało najwyższy wskaźnik. Mamy więc klasę, która zawiera bardzo atrakcyjne i "mocne" województwa.<br><br>
+
+
+
+**Tabela 14** - Statystyki opisowe
+
+```{r warning=FALSE, message=FALSE}
+
+skupienia1 <- c("slaskie", "dolnoslaskie", "pomorskie",
+                   "zachodniopomorskie", "kujawsko-pomorskie")
+
+filtrowanie1 <- wojewodztwa_kmeans[wojewodztwa_kmeans$nazwa %in% skupienia1, ]
+
+srednie1 <- c()
+zmiennosci1 <- c()
+  
+
+for(i in 1:14)
+{
+  srednie1[i] <- mean(filtrowanie1 [,i+2])
+  zmiennosci1[i] <- sd(filtrowanie1 [,i+2]) / srednie1[i] * 100
+}
+
+statystyki1 <- data.frame(
+  Cecha = colnames(wojewodztwa_kmeans)[3:16],
+  Srednia = round(srednie1,2),
+  Wsp_zmiennosci = round(zmiennosci1,2)
+)
+
+kable(statystyki1)
+```
+<br>
+
+**Tętniące życiem** - Kultura i rozrywka tych miejsc zapraszają. Na pewno nie będziesz się nudzić, chyba że lubisz wypoczywać w naturze<br>
+
+Województwa te charakteryzują się świetnie rozwiniętą infrastrukturą oraz mają najlepsze walory kulturalno-rekreacyjne. Wygrywają niemal każdą cechę z obu tych dziedzin w porównaniu z resztą Polski. Przyjeżdżając tutaj jest więc co robić (centra kultury, zoo i ogrody botaniczne, wydarzenia kluturalne) oraz jest się gdzie zatrzymać (obiekty noclegowe oraz wysoki stopień ich wykorzystania, gastronomia). Jest natomiast dość słabo pod względem środowiska (najmniejsza lesistość, najgorzej pod względem wysypisk, mało funduszy na ochronę środowiska). Jednak województwa te wypadały wspaniale w rankingu. Wydaje się, że skupiają się właśnie na rozwoju swojej infrastruktury oraz atrakcyjności pod względem rozrywkowym, kulturalnym, ponieważ te dwa sektory napędzają ich turystykę. Mają największy współczynnik miejsc noclegowych, a przy tym także największe procentowe wykorzystanie tych miejsc. Znaczy to, że turyści faktycznie je odwiedzają.
+
+<br><br><hr><br>
+
+Kolejną grupę województw stanowią województwa: **małopolskie, mazowiekckie, wielkopolskie i łódzkie.** Tutaj poza łódzkim ponownie mamy grupę bardzo atrakcyjnych turystycznie województw, które miały największy (małopolskie) lub ponadprzeciętny wskaźnik atrakcyjności na tle reszty. Algorytm uznał jednak, że województwo łódzkie również jest do tych trzech świetnych województw podobne.<br><br>
+
+**Tabela 15** - Statystyki opisowe
+
+```{r warning=FALSE, message=FALSE}
+skupienia2 <- c("malopolskie", "mazowieckie", "wielkopolskie", "lodzkie")
+
+filtrowanie2 <- wojewodztwa_kmeans[wojewodztwa_kmeans$nazwa %in% skupienia2, ]
+
+srednie2 <- c()
+zmiennosci2 <- c()
+  
+
+for(i in 1:14)
+{
+  srednie2[i] <- mean(filtrowanie2 [,i+2])
+  zmiennosci2[i] <- sd(filtrowanie2 [,i+2]) / srednie2[i] * 100
+}
+
+statystyki2 <- data.frame(
+  Cecha = colnames(wojewodztwa_kmeans)[3:16],
+  Srednia = round(srednie2,2),
+  Wsp_zmiennosci = round(zmiennosci2,2)
+)
+
+kable(statystyki2)
+```
+<br>
+
+**Ekologiczne przeciętniaki** - Przyjedź tu tylko dla środowiska, wszystko inne mają po prostu przeciętne <br>
+
+Są to województwa przede wszystkim wyróżniające się walorami środowiskowymi, każda z cech środowiskowych w tej grupie województw ma najwyższą lub niemal najwyższą średnią (niektóre cechy mają bardzo zbliżoną średnią w dwóch grupach województw). Wysypiska mają natomiast najniższą średnią, co jest także oczywiście najlepsze środowiskowo. Są to więc województwa lepsze od innych części kraju jeśli chodzi o naturalne środowisko. Turyści mogą przyjeżdżać tu właśnie dla tych walorów. Wygrywają także pod względem kin i komunikacji miejskiej. W pozostałych cechach nie są ani najlepsze, ani najgorsze - plasują się pomiędzy dwoma pozostałymi grupami.
+
+
+<br><br><hr><br>
+
+
+
+
+Największą grupa wydaje się być dość jednorodna, ponieważ należą do niej tylko województwa, które były przeciętne lub słabe według rankingów. Będą to więc województwa "słabsze", które odstają od lepszych atrakcyjnie województw. Są to: **lubelskie, lubuskie, opolskie, podkarpackie, podlaskie, świętokrzyskie i warmińsko-mazurskie**
+<br><br>
+
+**Tabela 16** - Statystyki opisowe
+
+```{r warning=FALSE, message=FALSE}
+skupienia3 <- c("lubelskie", "lubuskie", "opolskie", "podkarpackie",
+                "podlaskie", "swietokrzyskie", "warminsko-mazurskie")
+
+filtrowanie3 <- wojewodztwa_kmeans[wojewodztwa_kmeans$nazwa %in% skupienia3, ]
+
+srednie3 <- c()
+zmiennosci3 <- c()
+  
+
+for(i in 1:14)
+{
+  srednie3[i] <- mean(filtrowanie3 [,i+2])
+  zmiennosci3[i] <- sd(filtrowanie3 [,i+2]) / srednie3[i] * 100
+}
+
+statystyki3 <- data.frame(
+  Cecha = colnames(wojewodztwa_kmeans)[3:16],
+  Srednia = round(srednie3,2),
+  Wsp_zmiennosci = round(zmiennosci3,2)
+)
+
+kable(statystyki3)
+```
+
+<br>
+**Nudne zakątki** - Turyści nie mają tu czego szukać, będą się po prostu nudzić.
+
+<br>
+Ta grupa województw jest po prostu najsłabsza na tle kraju. Pod względem każdej cechy są najsłabsze lub co najwyżej przeciętne. Na tle pozostałych dwóch grup wypadają najgorzej dla 12 spośród 14 cech (oprócz lesistości oraz wysypisk).
+
+<br><br><br>
+
+## **3.2 Grupowanie hierarchiczne**
+
+<br>
+W ostatniej cześci pracy te same dane dotyczące województw zostaną pogrupowane, tym razem z zastosowaniem grupowania hierarchicznego i metody aglomeracyjnej. Jest to metoda, która na podstawie macierzy odległości łączy dwa najbliższe sobie punkty. Następnie są one traktowane jako jedna grupa i ponownie przeliczane są odległości wszystkich pozostałych punktów do tej grupy. W kolejnej iteracji znów mogą połączyć się dwa punkty, lub jeden punkt dołączyć się do już istniejącej grupy. Iteracja trwa aż do momentu, kiedy wszystkie punkty łączą się w jedną grupę. Ta metoda analizy skupień najlepiej widoczna jest na wykresie tak zwanym dendrogramie. Określić należy metodą, jaką przeliczane będą odległości między powstałymi grupami (nie jest to oczywsiste, jak obliczyć odległość między grupami lub między punktem a grupą). W zależności od wybranej metody kształt dendrogramu jest różny. Każda z metod ma trochę inne właściwości.<br><br>
+
+### **3.2a Różne metody przeliczania odległości między grupami**
+
+<br><br>
+Pogrupowano dane stosując cztery różne metody przeliczania odległości między powstałymi grupami:<br>
+-metoda najbliższego sąsiada<br>
+-metoda najdalszego sąsiada<br>
+-metoda średniej<br>
+-metoda Warda<br><br>
+
+**Wykresy 12** - Różne metody grupowania aglomeracyjnego
+
+```{r message=FALSE, warning=FALSE}
+rownames(skupienia_stand) <- wojewodztwa$nazwa
+
+najblizszy <- agnes(skupienia_stand, method="single")
+p1 <- plot(najblizszy, which = 2,
+           main = "Metoda najbliższego sąsiada",
+           xlab = "województwo",
+           ylab = "odległość")
+
+najdalszy <- agnes(skupienia_stand, method="complete")
+p2 <- plot(najdalszy, which = 2,
+           main = "Metoda najdalszego sąsiada",
+           xlab = "województwo",
+           ylab = "odległość")
+
+srodek <- agnes(skupienia_stand, method="average")
+p3 <- plot(srodek, which = 2,
+           main = "Metoda średniej",
+           xlab = "województwo",
+           ylab = "odległość")
+
+ward <- agnes(skupienia_stand, method="ward")
+p4 <- plot(ward, which = 2,
+           main = "Metoda Warda",
+           xlab = "województwo",
+           ylab = "odległość")
+
+
+```
+
+<br><br>
+Metoda najbliższego sąsiada i metoda średniej zadziałały podobnie. Obie mają tendencję do tworzenia długich łańcuchów. W obu tych przypadkach stworzyła się jedna duża grupa, która połączyła się z resztą dopiero pod koniec. Co ciekawe, w przypadku metody najbliższego sąsiada jako ostatnie do grupy zostało przyłączone województwo małopolskie, co wskazuje na to, że jest ono zupełnie inne od wszystkich pozostałych województw. W rankingu pod względem turystyczności było one na pierwszym miejscu, możliwe, że przewyższa wszystkie inne województwa aż tak bardzo, że nie znajduje podobnego do siebie. Natomiast w metodzie średniej znów województwo małopolskie znalazło swoją "parę" prawie pod sam koniec i było to województwo mazowieckie.<br>
+W metodzie Warda oraz najdalszego nie tworzą się na samym początku duże skumulowane grupy. Najpierw najczęściej obiekty łączone są w pary, a dopiero później te pary są łączone w coraz większe grupy. To podejście wydaje się lepsze. Można łatwiej zrozumieć, które dwa województwa są "bliźniakami" a dopiero następnie, jak te pary bliźniaków łączą się z resztą. Te dwie metody zadziałały bardzo podobnie i dały zbliżone wyniki. Zgadzają się wszystkie początkowe pary. Różni się potem dopiero, jak te pary łączone są w większe grupy.
+<br><br>
+Decyduję, że do dalszej interpretacji wybiorę metodę warda i to na jej podstawie utworzę grupy, które następnie zinterpretuję.<br><br>
+
+### **3.2b Metoda Warda**
+
+<br>
+Jeszcze raz warto przyjrzeć się dendrogramowi stworzonemu na podstawie grupowania aglomeracyjnego metodą Warda.
+<br>
+
+**Wykres 13** - Grupowanie aglomeracyjne metodą Warda
+
+```{r warning=FALSE, message=FALSE}
+p4 <- plot(ward, which = 2,
+           main = "Metoda Warda",
+           xlab = "województwo",
+           ylab = "odległość")
+```
+
+<br><br>
+Na samym początku połączone w pary zostały następujące województwa:<br>
+- lubuskie i warmińsko-mazurskie<br>
+- łódzkie i wielkopolskie <br>
+- dolnośląskie i śląskie<br>
+- lubelskie i świętokrzystkie<br>
+Te pary województw muszą być więc do siebie najbardziej podobne. Leżą na bliskich sobie terenach (oprócz lubuskiego i warmińsko-mazurskiego) oraz w grupowaniu wg. współczynnika atrakcyjności turystycznej wszystkie oprócz łódzkiego i wielkopolskiego były w tej samej grupie. Nie dziwi więc połączenie na początku właśnie takich województw.<br><br>Dalej pary lub małe grupki, które się tworzyły:<br>
+- pomorskie i zachodniopomorskie, do których za chwilę dołączyło także kujawsko-pomorskie (wszystkie województwa z pomorza, takie połączenie zupełnie nie dziwi)<br>
+- do łódzkiego i wielkopolskiego dołączyło się mazowieckie (województwa ze sobą sąsiadujące)<br>
+- powstała także para małopolskiego z podkarpackim (tutaj nieco dziwi, ponieważ małopolskie wygrywało rankingi, a podkarpackie było raczej w drugiej połowie. Niemniej jednak są to województwa ze sobą sąsiadujące)<br>
+<br><br>
+W dalszych już krokach poszczególne pary czy trójki łączył się w większe grupy. Do województw z pomorza dołączyły tereny Śląska (dokładnie tak samo, jak w grupowaniu podziałowym). Środek kraju połączył się z południem (tutaj znowu tak jak w przypadku grupowania podziałowego mamy małopolske, mazowieckie, wielkopolskie i łódzkie jeszcze dodatkowo z podkarpackim). Reszta województw połączyła się w kolejną grupę. Widać także, że te gorsze turystycznie województwa, które zamykały rankingi i miały przeciętny lub poniżej przeciętny wskaźnik atrakcyjności turstycznej, teraz łączą się razem i dopiero na samym końcu dołączają do całej reszty Polski. Dwie poprzednie grupy (pomorsko-śląska i centralno-południowa) są więc do siebie bardziej podobne (obie są całkiem dobrze lub bardzo dobrze atrakcyjnie turystycznie) w przeciwieństwie do tej ostatniej grupy słabych województw.<br><br>
+
+Analizując po kolei przyłączanie się województw do siebie oraz kształt dendrogramu naturalnym znów wydaje się podział ich na 3 grupy.<br><br>
+
+**Wykres 14** - Metoda Warda z podziałem na trzy grupy
+
+```{r warning=FALSE, message=FALSE}
+grupy3 <- cutree(as.hclust(ward), k = 3)
+
+plot(as.hclust(ward), 
+     main = "Metoda Warda - podział na 3 grupy", 
+     xlab = "województwa", 
+     ylab = "odległość")
+
+grupy3 <- cutree(as.hclust(ward), k = 3)
+
+rect.hclust(as.hclust(ward), k = 3, border = "red")
+```
+
+
+
+<br><br>
+Grupy prezentują się w ten sposób i są one niemal identyczne, jak w przypadku grupowania podziałowego. Jedyną różnicą jest przeskoczenie województwa podkarpackiego do grupy najlepszych województw. Może to być spowodowane tym, że wykazywało podobieństwo do województwa małopolskiego i dlatego to województwo "przeciągneło" je na stronę tych województw, które zostały sklasyfikowane wcześniej jako atrakcyjne. Podobnie mogło być z województwem łódzkim, które pomimo należenia do przeciętnej grupy jeśli chodzi o grupowanie według wskaźnika atrakcyjności turystycznej, w obu grupowaniach znalazło się z tymi najlepszymi, ponadprzeciętnymi województwami. Tutaj mogło przeważyć podobieństwo łódzkiego do wielkopolskiego. Skoro grupy różnią się między sobą tylko jednym województwem, interpretacja klas będzie identyczna jak w przypadku grupowania metodą podziałową, z tą różnicą, że do Ekologicznych przeciętniaków dołączyło województwo podkarpackie. To województwo faktycznie wyróżniało się pozytywnie pod względem wielu cech środowiskowych (było słabe jedynie w funduszach na ochronę środowiska, wszystkie pozostałe cechy środowiskowe prezentowało na świetnym poziomie), dlatego pasuje także i w tej grupie. Aby udowodnić podobieństwo małopolskiego i podkarpackiego, zaprezentuję jeszcze te dwa województwa na wykresie radarowym.<br><br>
+
+**Wykres 15** - Porównanie województwa małopolskiego i podkarpackiego
+
+```{r warning=FALSE, message=FALSE}
+malopolskie <- unit_wojewodztwa[6, 3:ncol(wojewodztwa)]
+podkarpackie <- unit_wojewodztwa[9, 3:ncol(wojewodztwa)]
+
+radar_zacho_podk <- rbind(max_values, min_values, malopolskie, podkarpackie)
+
+radarchart(radar_zacho_podk, 
+           axistype = 1,        
+           pcol = c("#0033CC99", "#66CC0099"),
+           plwd = 2,            
+           plty = 1,          
+           title = "Cechy województw małopolskiego i podkarpackiego",
+           cglcol = "grey",   
+           cglty = 1,     
+           axislabcol = "black",   
+           caxislabels = seq(0, 1, 0.25), 
+           vlcex = 0.8        
+)
+
+legend(x = "topright", legend = c("Małopolskie", "Podkarpackie"), 
+       col = c("#0033CC99", "#66CC0099"),
+       pch = 20, bty = "n", pt.cex = 2, cex = 0.8, text.col = "black")
+
+```
+<br>
+Widać, że Małopolska jest o wiele lepsza od podkarpackiego (taki wynik nie dziwi, w końcu to właśnie małopolska wygrywała rankingi, a podkarpackie było gdzieś w drugiej połówce). Jednak pomimo tego, widać podobieństwo w kształcie wykresu radarowego. Oba województwa najlepiej prezentują się środowiskowo. Należy pamiętać, że według dendrogramu nie były to wcale województwa, które połączyły się na początku, ale mniej więcej w połowie. Nie są one więc bliźniacze, ale wykres radarowy pomaga jednak zrozumieć, dlaczego to małopolska przyciągnęła do siebie podkarpackie, wyciągając je z najgorszej trzeciej grupy. 
+<br><br>
+Ostatnim porównaniem będzie zaprezentowanie dwóch województw, które dendrogram połączył na samym początku. Powinny być więc one najbardziej bliźniacze.<br><br>
+
+**Wykres 16** - Porównanie najbardziej podobnych do siebie województw
+
+```{r}
+lubuskie <- unit_wojewodztwa[4, 3:ncol(wojewodztwa)]
+warminsko <- unit_wojewodztwa[14, 3:ncol(wojewodztwa)]
+
+radar_zacho_podk <- rbind(max_values, min_values, lubuskie, warminsko)
+
+radarchart(radar_zacho_podk, 
+           axistype = 1,        
+           pcol = c("#0033CC99", "#66CC0099"),
+           plwd = 2,            
+           plty = 1,          
+           title = "Cechy województw lubuskiego i warmińsko-mazurskiego",
+           cglcol = "grey",   
+           cglty = 1,     
+           axislabcol = "black",   
+           caxislabels = seq(0, 1, 0.25), 
+           vlcex = 0.8        
+)
+
+legend(x = "topright", legend = c("Lubuskie", "Warmińsko-mazurskie"), 
+       col = c("#0033CC99", "#66CC0099"),
+       pch = 20, bty = "n", pt.cex = 2, cex = 0.8, text.col = "black")
+```
+
+<br>
+Tutaj nie ma wątpliwości, że są do siebie bliźniaczo podobne. Wykresy mają niemal identyczny kształt, w wielu miejsach przyjmują bardzo podobne wartości, czasem jedno województwo jest lekko lepsze od tego drugiego, ale co do samego kształtu są niemal identyczne. Jedyna znacząca różnica jest widoczna w funduszach na ochronę środowiska - lubuskie wydaje bardzo dużo w przeliczeniu na osobę, natomiast warmińsko-maruzkie bardzo mało.
+
+<br><br><br>
+
+# **4. Podsumowanie**
+
+<br><br>
+
+
+Celem pracy była ocena atrakcyjności województw Polski korzystając z porządkowania liniowego oraz analizy skupień. Choć obie te metody są zupełnie inne, obie doprowadziły ostatecznie do podzielenia województw na grupy. Porządkowanie liniowe pozwoliło oprócz stworzenia rankingu także podzielić województwa na 4 grupy biorąc pod uwagę wskaźnik atrakcyjności turystycznej (jego średnią, odchylenie), natomiast analiza skupień dwoma metodami szukała województw jak najbardziej podobnych do siebie w grupie i jednocześnie innych niż reszta. Interpretacja wyników obu badań doprowadziła do podobnych wniosków. Okazało się, że atrakcyjne turystycznie województwa są do siebie podobne. Udało się rozróżnić jednak, które z tych atrakcyjnych województw są lepsze pod względem środowiska, a które pod względem klutury, rozrywki i infrastruktury. W ten sposób powstały dwie różne grupy charakteryzujące się czymś innym. W tym podziale ważniejsze nawet niż najwyższe miejsca w rankingu okazało się właśnie to, jakie dane województwo przejawia cechy. Tym sposbem województwo małopolskie (miejsce 1 metoda Hellwiga) wylądowało w grupie razem z województwami z miejsc 6,7 i 9, bo wszystkie były świetne środowiskowo (a w pozostałych cechach po prostu niezłe. Małopolskie jako zwycięzca było świetne prawie we wszystkim, a te pozostałe województwa z jego grupy były przeciętne, ale nie złe). Pozostałe wysokie miejsca czyli 2,3,4,5 i 8 stworzyły drugą grupę wyróżniającą się kluturą i infrastrukturą. Województwa zazwyczaj zamykające rankingi wylądowały w grupie razem, bo nie miały nic, czym mogłyby się wyróżnić na tle reszty. Spornym województwem okazało się podkarpackie, bo mogło pasować i do tej środowiskowej grupy, ale jednak ze względu na swoją słabość w reszcie cech, pasowało również do grupy najgorszych województw.
+
+
+
+
+
+
+
+
